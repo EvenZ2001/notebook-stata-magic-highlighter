@@ -1,0 +1,51 @@
+{
+  "name": "notebook-stata-magic-highlighter",
+  "displayName": "Notebook %%stata Highlighter",
+  "description": "Automatically switches notebook cells to Stata syntax highlighting when they start with %%stata magic.",
+  "version": "0.0.1",
+  "publisher": "local-dev",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Notebooks"
+  ],
+  "activationEvents": [
+    "onNotebook:jupyter-notebook"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "stata",
+        "aliases": [
+          "Stata",
+          "stata"
+        ],
+        "extensions": [
+          ".do",
+          ".ado"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "stata",
+        "scopeName": "source.stata",
+        "path": "./syntaxes/stata.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.4"
+  }
+}
