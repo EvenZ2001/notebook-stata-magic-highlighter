@@ -4,6 +4,7 @@ const STATA_LANGUAGE_ID = 'stata';
 const DEFAULT_NOTEBOOK_LANGUAGE_ID = 'python';
 const AUTO_SWITCH_FLAG = 'stataMagicAutoSwitched';
 const STATA_MAGIC_REGEX = /^\s*%%stata(?:\s+.*)?$/i;
+const processingNotebookUris = new Set<string>();
 
 export function activate(context: vscode.ExtensionContext): void {
   const debounced = debounce((notebook: vscode.NotebookDocument) => {
@@ -39,66 +40,70 @@ function isJupyterNotebook(notebook: vscode.NotebookDocument): boolean {
 }
 
 async function processNotebook(notebook: vscode.NotebookDocument): Promise<void> {
-  const visibleEditor = vscode.window.visibleNotebookEditors.find(
-    (editor) => editor.notebook.uri.toString() === notebook.uri.toString()
-  );
+  const notebookUri = notebook.uri.toString();
 
-  if (!visibleEditor) {
+  if (processingNotebookUris.has(notebookUri)) {
     return;
   }
 
-  for (let i = 0; i < notebook.cellCount; i += 1) {
-    const cell = notebook.cellAt(i);
-    if (cell.kind !== vscode.NotebookCellKind.Code) {
-      continue;
-    }
+  processingNotebookUris.add(notebookUri);
 
-    const firstLine = cell.document.lineCount > 0 ? cell.document.lineAt(0).text : '';
-    const hasStataMagic = STATA_MAGIC_REGEX.test(firstLine);
-    const wasAutoSwitched = Boolean(cell.metadata?.[AUTO_SWITCH_FLAG]);
+  try {
+    for (let i = 0; i < notebook.cellCount; i += 1) {
+      const cell = notebook.cellAt(i);
+      if (cell.kind !== vscode.NotebookCellKind.Code) {
+        continue;
+      }
 
-    if (hasStataMagic && cell.document.languageId !== STATA_LANGUAGE_ID) {
-      await changeCellLanguage(visibleEditor, i, STATA_LANGUAGE_ID);
-      await setAutoSwitchedMetadata(notebook, i, true);
-      continue;
-    }
+      const firstLine = cell.document.lineCount > 0 ? cell.document.lineAt(0).text : '';
+      const hasStataMagic = STATA_MAGIC_REGEX.test(firstLine);
+      const wasAutoSwitched = Boolean(cell.metadata?.[AUTO_SWITCH_FLAG]);
 
-    if (!hasStataMagic && wasAutoSwitched && cell.document.languageId === STATA_LANGUAGE_ID) {
-      await changeCellLanguage(visibleEditor, i, DEFAULT_NOTEBOOK_LANGUAGE_ID);
-      await setAutoSwitchedMetadata(notebook, i, false);
+      if (hasStataMagic && cell.document.languageId !== STATA_LANGUAGE_ID) {
+        await updateCellLanguage(notebook, i, STATA_LANGUAGE_ID, true);
+        continue;
+      }
+
+      if (!hasStataMagic && wasAutoSwitched && cell.document.languageId === STATA_LANGUAGE_ID) {
+        await updateCellLanguage(notebook, i, DEFAULT_NOTEBOOK_LANGUAGE_ID, false);
+      }
     }
+  } finally {
+    processingNotebookUris.delete(notebookUri);
   }
 }
 
-async function changeCellLanguage(
-  editor: vscode.NotebookEditor,
-  index: number,
-  language: string
-): Promise<void> {
-  const range = new vscode.NotebookRange(index, index + 1);
-  await vscode.commands.executeCommand('notebook.cell.changeLanguage', {
-    range,
-    language,
-    notebookEditor: editor
-  });
-}
-
-async function setAutoSwitchedMetadata(
+async function updateCellLanguage(
   notebook: vscode.NotebookDocument,
   index: number,
-  enabled: boolean
+  language: string,
+  autoSwitched: boolean
 ): Promise<void> {
   const cell = notebook.cellAt(index);
   const nextMetadata = { ...cell.metadata } as Record<string, unknown>;
 
-  if (enabled) {
+  if (autoSwitched) {
     nextMetadata[AUTO_SWITCH_FLAG] = true;
   } else {
     delete nextMetadata[AUTO_SWITCH_FLAG];
   }
 
+  const replacement = new vscode.NotebookCellData(
+    cell.kind,
+    cell.document.getText(),
+    language
+  );
+  replacement.metadata = nextMetadata;
+  replacement.outputs = [...cell.outputs];
+  replacement.executionSummary = cell.executionSummary;
+
   const edit = new vscode.WorkspaceEdit();
-  edit.set(notebook.uri, [vscode.NotebookEdit.updateCellMetadata(index, nextMetadata)]);
+  edit.set(notebook.uri, [
+    vscode.NotebookEdit.replaceCells(
+      new vscode.NotebookRange(index, index + 1),
+      [replacement]
+    )
+  ]);
   await vscode.workspace.applyEdit(edit);
 }
 
